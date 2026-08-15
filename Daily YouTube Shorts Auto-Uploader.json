@@ -1,0 +1,396 @@
+{
+  "name": "Daily YouTube Shorts Auto-Uploader",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "c6fe1e98-f8b6-4e0b-833a-5b7b2e5639bc",
+      "name": "Every Day 8AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "returnAll": true,
+        "filter": {
+          "driveId": {
+            "__rl": true,
+            "mode": "list",
+            "value": "My Drive",
+            "cachedResultName": "My Drive"
+          },
+          "folderId": {
+            "__rl": true,
+            "mode": "list",
+            "value": "1tmCBht1ZHvmqYSVe8wd0OFPL-qdBU9a9",
+            "cachedResultName": "reels (source)",
+            "cachedResultUrl": "https://drive.google.com/drive/folders/1tmCBht1ZHvmqYSVe8wd0OFPL-qdBU9a9"
+          },
+          "whatToSearch": "files"
+        },
+        "options": {
+          "fields": [
+            "id",
+            "name"
+          ]
+        }
+      },
+      "id": "c4d46be0-38da-4970-be1a-d908166d47b8",
+      "name": "List Shorts Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        224,
+        336
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "SDLGe4qeusajlNvo",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst uploaded = Array.isArray(staticData.uploadedFileIds) ? staticData.uploadedFileIds : [];\nconst files = $input.all().filter((i) => i.json && i.json.id);\n// Ignore videos that were already uploaded\nconst unprocessed = files.filter((i) => !uploaded.includes(i.json.id));\nif (unprocessed.length === 0) {\n  return [];\n}\n// Google Drive returns files in ascending creation order; the first is the oldest\nunprocessed.sort((a, b) => String(a.json.name || \"\").localeCompare(String(b.json.name || \"\")));\n// sanitize the file name (remove leading/trailing spaces and unsafe characters)\nconst chosen = unprocessed[0];\nconst rawName = String(chosen.json.name || \"video.mp4\");\nconst safeName = rawName.trim().replace(/\\s+/g, \"_\").replace(/[^A-Za-z0-9._-]/g, \"\") || \"video.mp4\";\nchosen.json.safeName = safeName;\nreturn [chosen];"
+      },
+      "id": "b8229891-0874-4b3d-ae40-0230c00c399b",
+      "name": "Select Oldest Unprocessed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
+        "options": {
+          "binaryPropertyName": "data",
+          "fileName": "={{ $json.safeName }}"
+        }
+      },
+      "id": "5e17442e-76f5-498f-a8d8-55e3c8a0b005",
+      "name": "Download Video",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        672,
+        336
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "SDLGe4qeusajlNvo",
+          "name": "Google Drive account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map((i) => ({\n  json: {\n    timestamp: $now.toISO(),\n    workflow: $workflow.name,\n    executionId: $execution.id,\n    error: (i.json && (i.json.error || i.json.message)) || \"Unknown error\",\n    details: i.json || {},\n  },\n}));"
+      },
+      "id": "6e7f9e64-26c5-4944-8193-4d90c5b8bc0c",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "video",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-3.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-3.5-flash"
+        },
+        "text": "You are a YouTube Shorts growth expert. Watch this complete video and generate optimized metadata.\nRespond with ONLY a raw JSON object (no markdown, no code fences) using EXACTLY these keys:\n{\n  \"title\": \"viral YouTube title, MAX 100 characters\",\n  \"description\": \"SEO optimized YouTube description, 2-4 sentences\",\n  \"hashtags\": [\"array of exactly 20 relevant hashtags, each starting with #\"],\n  \"tags\": [\"array of exactly 20 keyword tags\"],\n  \"keywords\": \"short comma-separated SEO keywords\"\n}\nEnsure the title is under 100 characters. Return valid JSON only.",
+        "inputType": "binary",
+        "options": {
+          "maxOutputTokens": 1024
+        }
+      },
+      "id": "a8dfb58f-ec3b-4a01-a97d-bd3f20b4db4e",
+      "name": "Gemini 2.5 Flash Vision",
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        896,
+        272
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "googlePalmApi": {
+          "id": "cy06CrG1myYLsqOE",
+          "name": "Google Gemini(PaLM) Api account 2"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const raw = $json.content ?? $json.text ?? $json.response ?? $json.output ?? \"\";\nlet textOut = typeof raw === \"string\" ? raw : JSON.stringify(raw);\ntextOut = textOut.replace(/```json/gi, \"\").replace(/```/g, \"\").trim();\nlet data = {};\ntry { data = JSON.parse(textOut); } catch (e) { data = {}; }\n\nconst title = String(data.title || \"New YouTube Short\").slice(0, 100);\nlet hashtags = data.hashtags;\nif (Array.isArray(hashtags)) hashtags = hashtags.join(\" \");\nhashtags = hashtags || \"\";\nlet tags = data.tags;\nif (Array.isArray(tags)) tags = tags.join(\", \");\ntags = String(tags || \"\");\nconst keywords = String(data.keywords || \"\");\nconst baseDesc = String(data.description || \"\");\nconst description = [baseDesc, \"\", hashtags, \"\", keywords ? (\"Keywords: \" + keywords) : \"\"].join(\"\\n\").trim();\n\nconst selected = $(\"Select Oldest Unprocessed\").item.json;\nconst dl = $(\"Download Video\").item;\nreturn {\n  json: {\n    title,\n    description,\n    tags,\n    hashtags,\n    keywords,\n    driveFileId: selected.id,\n    driveFileName: selected.name,\n  },\n  binary: dl && dl.binary ? dl.binary : {},\n};"
+      },
+      "id": "fdab361f-7e6e-44b8-965e-8ecb85ac5d43",
+      "name": "Parse Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        192
+      ],
+      "retryOnFail": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resource": "video",
+        "operation": "upload",
+        "title": "={{ $json.title }}",
+        "regionCode": "US",
+        "categoryId": "24",
+        "options": {
+          "defaultLanguage": "en",
+          "description": "={{ $json.description }}",
+          "embeddable": true,
+          "notifySubscribers": true,
+          "privacyStatus": "public",
+          "selfDeclaredMadeForKids": false,
+          "tags": "={{ $json.tags }}"
+        }
+      },
+      "id": "3b84928e-85a7-4fbb-8820-b4dac95fddfe",
+      "name": "Upload to YouTube",
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        1344,
+        128
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "id": "Bl5E1O3W5GbOxkTX",
+          "name": "YouTube account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $(\"Select Oldest Unprocessed\").item.json.id }}"
+        },
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive",
+          "cachedResultName": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "13nuzV2UMdCVinh02OJt0zB37Oax-RkPW",
+          "mode": "list",
+          "cachedResultName": "reels (Uploaded)",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/13nuzV2UMdCVinh02OJt0zB37Oax-RkPW"
+        }
+      },
+      "id": "693d0a68-a53c-4bd9-aa57-1ec6c1ec8982",
+      "name": "Move to Uploaded",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1568,
+        48
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "SDLGe4qeusajlNvo",
+          "name": "Google Drive account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst uploaded = Array.isArray(staticData.uploadedFileIds) ? staticData.uploadedFileIds : [];\nconst id = $(\"Select Oldest Unprocessed\").first().json.id;\nif (id && !uploaded.includes(id)) {\n  uploaded.push(id);\n}\nstaticData.uploadedFileIds = uploaded;\nreturn [{ json: { recordedFileId: id, totalUploaded: uploaded.length, uploadedAt: $now.toISO() } }];"
+      },
+      "id": "ea1407f7-afef-4d60-aa08-85809b58cd58",
+      "name": "Record Uploaded ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every Day 8AM": {
+      "main": [
+        [
+          {
+            "node": "List Shorts Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Shorts Folder": {
+      "main": [
+        [
+          {
+            "node": "Select Oldest Unprocessed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Oldest Unprocessed": {
+      "main": [
+        [
+          {
+            "node": "Download Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Video": {
+      "main": [
+        [
+          {
+            "node": "Gemini 2.5 Flash Vision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 2.5 Flash Vision": {
+      "main": [
+        [
+          {
+            "node": "Parse Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Metadata": {
+      "main": [
+        [
+          {
+            "node": "Upload to YouTube",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to YouTube": {
+      "main": [
+        [
+          {
+            "node": "Move to Uploaded",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move to Uploaded": {
+      "main": [
+        [
+          {
+            "node": "Record Uploaded ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "819f874f-8dd8-4906-87ae-8e6bf0d45e66",
+  "meta": {
+    "instanceId": "ef318d3ee6dda0dbb477d09ba112259b6080308b530c8faf14950186c17b7190"
+  },
+  "nodeGroups": [],
+  "id": "uaPFPCwjEe22Raak",
+  "tags": []
+}
